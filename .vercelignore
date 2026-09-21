@@ -1,0 +1,6 @@
+tmp/
+**/*.private.gs
+**/.env*
+**/node_modules/
+**/.next/
+**/*.tsbuildinfo
