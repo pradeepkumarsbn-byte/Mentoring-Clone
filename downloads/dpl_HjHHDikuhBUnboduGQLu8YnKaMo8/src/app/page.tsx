@@ -1,13 +1,16 @@
 "use client";
 
+import HostelMapView from "./hostel-map-view";
+import HostelFields from "./hostel-fields";
+import OverviewStats from "./overview-stats";
 import { CSSProperties, FormEvent, useCallback, useEffect, useRef, useState } from "react";
 
-type View = "overview" | "planning" | "boys" | "programs" | "attendance" | "invitations" | "mentors" | "content";
+type View = "map" | "overview" | "planning" | "boys" | "programs" | "attendance" | "invitations" | "mentors" | "content";
 type Modal = "boy" | "program" | null;
 type Mentor = { id: string; name: string; initials: string; tone: string };
 type ProgramType = { id: string; name: string };
 type BoyStatus = "Active" | "Passive" | "Dropped";
-type Boy = { id: string; name: string; contact: string; college: string; hostel: string; branch: string; section: string; status: BoyStatus; mentorId: string; comment: string; createdAt: string; createdBy: string };
+type Boy = { id: string; name: string; contact: string; college: string; hostel: string; floor: string; branch: string; section: string; status: BoyStatus; mentorId: string; comment: string; createdAt: string; createdBy: string };
 type Program = { id: string; name: string; programTypeId: string; programType: string; date: string; venue: string; speaker: string; createdAt: string };
 type Attendance = { id: string; programId: string; boyId: string; mentorId: string; status: "Present" | "Absent" | "Late"; reason: string; updatedAt: string; updatedBy: string };
 type Invitation = { id: string; programId: string; boyId: string; mentorId: string; response: string; updatedAt: string; updatedBy: string };
@@ -20,6 +23,7 @@ const nav: { id: View; label: string }[] = [
   { id: "overview", label: "Overview" },
   { id: "planning", label: "Planning" },
   { id: "boys", label: "Boys" },
+  { id: "map", label: "Map" },
   { id: "programs", label: "Programs" },
   { id: "attendance", label: "Attendance" },
   { id: "invitations", label: "Invitations" },
@@ -261,7 +265,7 @@ export default function Home() {
     reading.current = true;
     const startedRevision = revision.current;
     try {
-      const response = await fetch("/api/mentoring", { cache: "no-store" });
+      const response = await fetch("/api/mentoring", { cache: "no-store", signal: AbortSignal.timeout(170000) });
       const result = await response.json() as State & { error?: string; signInPath?: string };
       if(startedRevision !== revision.current) return;
       if (response.status === 401 && result.signInPath) {
@@ -277,7 +281,7 @@ export default function Home() {
       if(startedRevision !== revision.current) return;
       failures.current += 1;
       retryAfter.current = Date.now() + Math.min(120000, 30000 * 2 ** (failures.current - 1));
-      setError(caught instanceof Error ? caught.message : "Could not load the live database.");
+      setError(caught instanceof Error && caught.name === "TimeoutError" ? "The connection timed out. Your loaded records remain visible; reconnecting automatically." : caught instanceof Error ? caught.message : "Could not load the live database.");
     } finally {
       reading.current = false;
       setLoading(false);
@@ -289,11 +293,14 @@ export default function Home() {
     const backgroundRefresh = () => { if(document.visibilityState === "visible" && Date.now() >= retryAfter.current) void refresh(); };
     const interval = window.setInterval(backgroundRefresh, refreshSeconds * 1000);
     const refreshOnFocus = backgroundRefresh;
+    const reconnect = () => { retryAfter.current = 0; void refresh(); };
     window.addEventListener("focus", refreshOnFocus);
+    window.addEventListener("online", reconnect);
     return () => {
       window.clearTimeout(initial);
       window.clearInterval(interval);
       window.removeEventListener("focus", refreshOnFocus);
+      window.removeEventListener("online", reconnect);
     };
   }, [refresh, refreshSeconds]);
 
@@ -374,7 +381,9 @@ export default function Home() {
 
         {error && <div className="error-banner" role="alert"><span>!</span><p>{error}</p><button onClick={() => void refresh()}>Retry</button></div>}
 
-        {showMetrics && <section className="metric-grid" aria-label="Program summary">
+        {view === "overview" && <OverviewStats data={data} loading={loading} error={error} />}
+
+        {showMetrics && view !== "overview" && view !== "map" && <section className="metric-grid" aria-label="Program summary">
           <article className="metric-card featured"><p>Total boys</p><strong>{loading ? "—" : data.boys.length}</strong><span>Across {data.mentors.length} mentors</span></article>
           <article className="metric-card"><p>Programs</p><strong>{loading ? "—" : data.programs.length}</strong><span>Dated DYS sessions</span></article>
           <article className="metric-card"><p>Present entries</p><strong>{loading ? "—" : present.length}</strong><span>{reached} unique boys reached</span></article>
@@ -385,6 +394,7 @@ export default function Home() {
           {loading ? <LoadingState /> : <>
             {view === "overview" && <Overview data={data} setView={setView} setModal={setModal} openProfile={setProfileBoyId} />}
             {view === "planning" && <PlanningView data={data} />}
+            {view === "map" && <HostelMapView boys={data.boys} openProfile={setProfileBoyId} ready={!!data.refreshedAt} />}
             {view === "boys" && <BoysView data={data} setModal={setModal} openProfile={setProfileBoyId} />}
             {view === "programs" && <ProgramsView data={data} setModal={setModal} setView={setView} save={save} busy={busy} editProgram={(programId) => { setEditingProgramId(programId); setModal("program"); }} />}
             {view === "attendance" && <AttendanceView data={data} save={save} busy={busy} />}
@@ -417,6 +427,7 @@ function Overview({ data, setView, setModal, openProfile }: { data: State; setVi
   const zeroAttendance = data.boys.filter((boy) => boy.status !== "Dropped" && !data.attendance.some((record) => record.boyId === boy.id && record.status === "Present"));
   const attention = zeroAttendance.filter((boy) => needsMentorAttention(data, boy.id));
   return <div className="view-panel overview-grid">
+    <OverviewStats data={data} />
     <article className="panel program-panel">
       <div className="panel-heading"><div><p className="eyebrow">{siteText(data, "overview_program_eyebrow", "Program performance")}</p><h2>{siteText(data, "overview_program_title", "Attendance by program type")}</h2></div><span className="muted-tag">All repeat dates combined</span></div>
       <div className="program-list">{typeStats.length ? typeStats.map((stat) => <div className="program-row" key={stat.type.id}><div className="program-top"><div><strong>{stat.type.name}</strong><span>{stat.sessions} dated {stat.sessions === 1 ? "session" : "sessions"}</span></div><b>{stat.entries} present</b></div><div className="bar-track"><span style={{ width: `${Math.max(4, Math.min(100, (stat.unique / Math.max(data.boys.length, 1)) * 100))}%` }} /></div><div className="program-foot"><span>{stat.unique} unique boys reached</span><span>{data.boys.length - stat.unique} still eligible</span></div></div>) : <Empty text="Add a program to begin tracking." />}</div>
@@ -436,18 +447,20 @@ function PlanningView({ data }: { data: State }) {
   const [type, setType] = useState("all");
   const [semester, setSemester] = useState("all");
   const [showPast, setShowPast] = useState(false);
+  const [institution, setInstitution] = useState("all");
+  const institutionOf = (scope: string) => /NIT Warangal/i.test(scope) ? "NIT Warangal" : /VNRVJIET/i.test(scope) ? "VNRVJIET" : "Other";
   const today = localIsoDate();
   const lookaheadDays = boundedNumber(siteSetting(data, "planning_lookahead_days", "120"), 120, 30, 365);
   const cutoffDate = new Date(`${today}T00:00:00`);
   cutoffDate.setDate(cutoffDate.getDate() + lookaheadDays);
   const cutoff = localIsoDate(cutoffDate);
   const normalized = query.trim().toLowerCase();
-  const allEvents = [...data.calendarEvents].sort((a, b) => a.startDate.localeCompare(b.startDate) || a.title.localeCompare(b.title));
+  const allEvents = data.calendarEvents.filter(event => institution === "all" || institutionOf(event.scope) === institution).sort((a, b) => a.startDate.localeCompare(b.startDate) || a.title.localeCompare(b.title));
   const upcoming = allEvents.filter((event) => event.endDate >= today && event.startDate <= cutoff);
   const availableWindows = upcoming.filter((event) => event.availability === "Likely Available");
   const busyWindows = upcoming.filter((event) => event.availability === "Busy");
   const currentEvents = allEvents.filter((event) => event.startDate <= today && event.endDate >= today);
-  const affectedBoys = data.boys.filter((boy) => /vnrvjiet|vnr vignana|vignana jyothi/i.test(boy.college));
+  const affectedBoys = data.boys.filter((boy) => (institution !== "NIT Warangal" && /vnrvjiet|vnr vignana|vignana jyothi/i.test(boy.college)) || (institution !== "VNRVJIET" && /nitw|nit warangal|national institute of technology.*warangal/i.test(boy.college)));
   const visible = allEvents.filter((event) =>
     (showPast || event.endDate >= today)
     && (availability === "all" || event.availability === availability)
@@ -469,16 +482,16 @@ function PlanningView({ data }: { data: State }) {
     <SectionTitle
       eyebrow={siteText(data, "planning_eyebrow", "Academic planning")}
       title={siteText(data, "planning_title", "Plan preaching around college life")}
-      copy={siteText(data, "planning_description", "See examinations, holidays and breaks together. Use the availability signals as guidance, then confirm each boy's hostel and travel plans before inviting.")}
+      copy={siteText(data, "planning_description", "See examinations, holidays and breaks together. Use the availability signals as guidance, then confirm each boy's room number and travel plans before inviting.")}
       action={<a className="primary-button planning-sheet-link" href="/api/spreadsheet?tab=calendar" target="_blank" rel="noreferrer">Edit calendar in Sheet →</a>}
     />
 
-    <div className="planning-scope-note"><span>i</span><div><strong>VNRVJIET B.Tech I Year · 2026–27</strong><p>Academic dates apply to the R25 admitted batch, except Biotechnology. Holiday data currently covers calendar year 2026. Availability is a planning signal, not a guarantee.</p></div></div>
+    <div className="planning-scope-note"><span>i</span><div><strong>NIT Warangal and VNRVJIET ? 2026?27</strong><p>NIT Warangal dates cover the programs and semesters listed on each event. VNRVJIET academic dates cover B.Tech I Year (R25), except Biotechnology. Filter by institution before planning; availability is guidance, not a guarantee.</p></div></div>
 
     <section className="planning-kpis" aria-label="Academic planning summary">
       <article><span className="planning-kpi-icon available">○</span><div><strong>{availableWindows.length}</strong><p>Likely available windows</p><small>Next {lookaheadDays} days</small></div></article>
       <article><span className="planning-kpi-icon busy">!</span><div><strong>{busyWindows.length}</strong><p>Busy periods</p><small>Exams and assessments</small></div></article>
-      <article><span className="planning-kpi-icon normal">⌁</span><div><strong>{affectedBoys.length}</strong><p>Matched boys</p><small>College field matches VNRVJIET</small></div></article>
+      <article><span className="planning-kpi-icon normal">⌁</span><div><strong>{affectedBoys.length}</strong><p>Matched boys</p><small>College matches selected institution(s)</small></div></article>
       <article><span className="planning-kpi-icon confirm">?</span><div><strong>{currentEvents.length}</strong><p>Active today</p><small>{currentEvents[0]?.title ?? "No calendar event today"}</small></div></article>
     </section>
 
@@ -490,6 +503,7 @@ function PlanningView({ data }: { data: State }) {
     {currentEvents.length > 0 && <section className="today-planning"><div><p className="eyebrow">Happening now</p><h3>{currentEvents.map((event) => event.title).join(" · ")}</h3></div><div>{currentEvents.map((event) => <span className={`availability-badge ${availabilityClass(event.availability)}`} key={event.id}>{event.availability}</span>)}</div></section>}
 
     <div className="planning-filter-bar">
+      <select aria-label="Institution" value={institution} onChange={event => { setInstitution(event.target.value); setSemester("all"); }}><option value="all">All institutions</option><option>NIT Warangal</option><option>VNRVJIET</option></select>
       <Search value={query} onChange={setQuery} placeholder="Search exams, holidays or notes…" />
       <select value={availability} onChange={(event) => setAvailability(event.target.value)}><option value="all">All availability</option><option>Likely Available</option><option>Busy</option><option>Normal</option><option>Confirm</option></select>
       <select value={type} onChange={(event) => setType(event.target.value)}><option value="all">All event types</option>{eventTypes.map((item) => <option key={item}>{item}</option>)}</select>
@@ -531,8 +545,8 @@ function BoysView({ data, setModal, openProfile }: { data: State; setModal: (mod
   ).sort((a, b) => attendedCount(data, b.id) - attendedCount(data, a.id) || a.name.localeCompare(b.name));
   return <div className="view-panel">
     <SectionTitle eyebrow={siteText(data, "boys_eyebrow", "Boys database")} title={siteText(data, "boys_title", "Search, filter and follow up")} copy={siteText(data, "boys_description", "Open any boy's profile to see contact details, responses, attendance history, remarks and mentor comments.")} action={<button className="primary-button large-action" onClick={() => setModal("boy")}>＋ Add boy</button>} />
-    <div className="filter-bar multi-filter"><Search value={query} onChange={setQuery} placeholder="Search name, contact, mentor or comment…" /><select value={mentor} onChange={(event) => setMentor(event.target.value)}><option value="all">All mentors</option>{data.mentors.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select><select value={status} onChange={(event) => setStatus(event.target.value)}><option value="all">All statuses</option><option>Active</option><option>Passive</option><option>Dropped</option></select><select value={branch} onChange={(event) => setBranch(event.target.value)}><option value="all">All branches</option>{options("branch").map((item) => <option key={item}>{item}</option>)}</select><select value={section} onChange={(event) => setSection(event.target.value)}><option value="all">All sections</option>{options("section").map((item) => <option key={item}>{item}</option>)}</select><select value={hostel} onChange={(event) => setHostel(event.target.value)}><option value="all">All hostels</option>{options("hostel").map((item) => <option key={item}>{item}</option>)}</select><span className="result-count">{rows.length} boys</span></div>
-    <div className="table-wrap boys-table"><table><thead><tr><th>Boy</th><th>Contact</th><th>Mentor</th><th>College / hostel</th><th>Branch / section</th><th>Status</th><th>Follow-up</th><th>Present</th></tr></thead><tbody>{rows.map((boy) => { const count = attendedCount(data, boy.id); const calls = followUpCount(data, boy.id); const flagged = needsMentorAttention(data, boy.id); return <tr key={boy.id}><td><button className="table-person profile-link" onClick={() => openProfile(boy.id)}><i>{initials(boy.name)}</i><span><strong>{boy.name}</strong><small>View complete profile →</small></span></button></td><td>{boy.contact ? <a className="contact-link" href={`tel:${boy.contact.replace(/[^\d+]/g, "")}`}>{boy.contact}</a> : "—"}</td><td>{mentorName(data, boy.mentorId)}</td><td>{boy.college || "—"}<small className="cell-sub">{boy.hostel || "—"}</small></td><td><span className="section-chip">{boy.section || "—"}</span><small className="cell-sub">{boy.branch || "—"}</small></td><td><span className={`status-badge ${boy.status.toLowerCase()}`}>{boy.status}</span></td><td>{flagged ? <button className="attention-chip" onClick={() => openProfile(boy.id)}>⚑ {calls} invitations</button> : <span>{calls} invitations</span>}</td><td><strong>{count}</strong> sessions</td></tr>; })}</tbody></table>{rows.length === 0 && <Empty text="No boys match these filters." />}</div>
+    <div className="filter-bar multi-filter"><Search value={query} onChange={setQuery} placeholder="Search name, contact, mentor or comment…" /><select value={mentor} onChange={(event) => setMentor(event.target.value)}><option value="all">All mentors</option>{data.mentors.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select><select value={status} onChange={(event) => setStatus(event.target.value)}><option value="all">All statuses</option><option>Active</option><option>Passive</option><option>Dropped</option></select><select value={branch} onChange={(event) => setBranch(event.target.value)}><option value="all">All branches</option>{options("branch").map((item) => <option key={item}>{item}</option>)}</select><select value={section} onChange={(event) => setSection(event.target.value)}><option value="all">All sections</option>{options("section").map((item) => <option key={item}>{item}</option>)}</select><select value={hostel} onChange={(event) => setHostel(event.target.value)}><option value="all">All rooms</option>{options("hostel").map((item) => <option key={item}>{item}</option>)}</select><span className="result-count">{rows.length} boys</span></div>
+    <div className="table-wrap boys-table"><table><thead><tr><th>Boy</th><th>Contact</th><th>Mentor</th><th>College / Room No</th><th>Branch / section</th><th>Status</th><th>Follow-up</th><th>Present</th></tr></thead><tbody>{rows.map((boy) => { const count = attendedCount(data, boy.id); const calls = followUpCount(data, boy.id); const flagged = needsMentorAttention(data, boy.id); return <tr key={boy.id}><td><button className="table-person profile-link" onClick={() => openProfile(boy.id)}><i>{initials(boy.name)}</i><span><strong>{boy.name}</strong><small>View complete profile →</small></span></button></td><td>{boy.contact ? <a className="contact-link" href={`tel:${boy.contact.replace(/[^\d+]/g, "")}`}>{boy.contact}</a> : "—"}</td><td>{mentorName(data, boy.mentorId)}</td><td>{boy.college || "—"}<small className="cell-sub">{boy.floor ? `${boy.floor} · ` : ""}{boy.hostel || "—"}</small></td><td><span className="section-chip">{boy.section || "—"}</span><small className="cell-sub">{boy.branch || "—"}</small></td><td><span className={`status-badge ${boy.status.toLowerCase()}`}>{boy.status}</span></td><td>{flagged ? <button className="attention-chip" onClick={() => openProfile(boy.id)}>⚑ {calls} invitations</button> : <span>{calls} invitations</span>}</td><td><strong>{count}</strong> sessions</td></tr>; })}</tbody></table>{rows.length === 0 && <Empty text="No boys match these filters." />}</div>
   </div>;
 }
 
@@ -704,12 +718,12 @@ function BoyProfileModal({ data, boyId, save, busy, onClose }: { data: State; bo
   }
 
   return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) onClose(); }}><section className="modal profile-modal" role="dialog" aria-modal="true" aria-labelledby="profile-title">
-    <div className="modal-head profile-head"><div className="profile-identity"><span className="profile-avatar">{initials(boy.name)}</span><div><p className="eyebrow">Boy profile · {mentorName(data, boy.mentorId)}</p><h2 id="profile-title">{boy.name}</h2><p>{boy.contact || "No contact number"} · {boy.college || "College not added"} · {boy.hostel || "Hostel not added"}</p></div></div><button className="modal-close" onClick={onClose} aria-label="Close">×</button></div>
+    <div className="modal-head profile-head"><div className="profile-identity"><span className="profile-avatar">{initials(boy.name)}</span><div><p className="eyebrow">Boy profile · {mentorName(data, boy.mentorId)}</p><h2 id="profile-title">{boy.name}</h2><p>{boy.contact || "No contact number"} · {boy.college || "College not added"} · {boy.hostel || "Room No not added"}</p></div></div><button className="modal-close" onClick={onClose} aria-label="Close">×</button></div>
     <div className="profile-stats"><div><strong>{attendance.filter((item) => item.record.status === "Present").length}</strong><span>Present entries</span></div><div><strong>{invitations.length}</strong><span>Invitations</span></div><div><strong>{boy.status}</strong><span>Current status</span></div><div className={needsMentorAttention(data, boy.id) ? "attention" : ""}><strong>{needsMentorAttention(data, boy.id) ? "Needs attention" : "On track"}</strong><span>{needsMentorAttention(data, boy.id) ? `${followUpCount(data, boy.id)} invitations, no attendance` : "Follow-up signal"}</span></div></div>
 
     <form className="profile-edit-form" onSubmit={updateProfile}>
       <div className="profile-section-heading"><div><p className="eyebrow">Profile management</p><h3>Contact, status and mentor notes</h3></div><span>Added {formatTimestamp(boy.createdAt)}{boy.createdBy ? ` by ${boy.createdBy}` : ""}</span></div>
-      <div className="profile-edit-grid"><label><span>Contact number</span><input name="contact" defaultValue={boy.contact} inputMode="tel" maxLength={24} /></label><label><span>Status</span><select name="status" defaultValue={boy.status}><option>Active</option><option>Passive</option><option>Dropped</option></select></label><label><span>Mentor</span><select name="mentorId" defaultValue={boy.mentorId}>{data.mentors.map((mentor) => <option key={mentor.id} value={mentor.id}>{mentor.name}</option>)}</select></label><label><span>College</span><input name="college" defaultValue={boy.college} /></label><label><span>Hostel</span><input name="hostel" defaultValue={boy.hostel} /></label><label><span>Branch</span><input name="branch" defaultValue={boy.branch} /></label><label><span>Section</span><input name="section" defaultValue={boy.section} /></label><label className="full"><span>Mentor comment about this boy</span><textarea name="comment" rows={4} maxLength={1500} defaultValue={boy.comment} placeholder="Interests, concerns, preferred follow-up, background or next step…" /></label></div>
+      <div className="profile-edit-grid"><label><span>Contact number</span><input name="contact" defaultValue={boy.contact} inputMode="tel" maxLength={24} /></label><label><span>Status</span><select name="status" defaultValue={boy.status}><option>Active</option><option>Passive</option><option>Dropped</option></select></label><label><span>Mentor</span><select name="mentorId" defaultValue={boy.mentorId}>{data.mentors.map((mentor) => <option key={mentor.id} value={mentor.id}>{mentor.name}</option>)}</select></label><label><span>College</span><input name="college" defaultValue={boy.college} /></label><HostelFields floor={boy.floor} room={boy.hostel} /><label><span>Branch</span><input name="branch" defaultValue={boy.branch} /></label><label><span>Section</span><input name="section" defaultValue={boy.section} /></label><label className="full"><span>Mentor comment about this boy</span><textarea name="comment" rows={4} maxLength={1500} defaultValue={boy.comment} placeholder="Interests, concerns, preferred follow-up, background or next step…" /></label></div>
       <div className="profile-actions"><button type="button" className="danger-button" disabled={busy === deleteKey} onClick={() => void deleteBoy()}>{busy === deleteKey ? "Deleting…" : "Delete boy"}</button><button className="primary-button large-action" type="submit" disabled={busy === profileKey}>{busy === profileKey ? "Saving…" : "Save profile"}</button></div>
     </form>
 
@@ -791,7 +805,7 @@ function ModalShell({ eyebrow, title, subtitle, onClose, children }: { eyebrow: 
 }
 
 function BoyForm({ mentors, onSubmit, saving }: { mentors: Mentor[]; onSubmit: (event: FormEvent<HTMLFormElement>) => void; saving: boolean }) {
-  return <form className="record-form" onSubmit={onSubmit}><label className="full"><span>Boy name *</span><input name="name" required autoFocus placeholder="Full name" /></label><label><span>Contact number</span><input name="contact" inputMode="tel" maxLength={24} placeholder="Mobile number" /></label><label><span>Mentor *</span><select name="mentorId" required defaultValue=""><option value="" disabled>Select mentor</option>{mentors.map((mentor) => <option key={mentor.id} value={mentor.id}>{mentor.name}</option>)}</select></label><label><span>College</span><input name="college" placeholder="e.g. NITW" /></label><label><span>Hostel</span><input name="hostel" placeholder="Hostel name" /></label><label><span>Branch</span><input name="branch" placeholder="e.g. CSE" /></label><label><span>Section</span><input name="section" placeholder="e.g. A" /></label><label><span>Status</span><select name="status" defaultValue="Active"><option>Active</option><option>Passive</option><option>Dropped</option></select></label><label className="full"><span>Initial mentor comment</span><textarea name="comment" rows={3} maxLength={1500} placeholder="Interest, background or next follow-up step…" /></label><div className="form-actions full"><button className="primary-button large-action" type="submit" disabled={saving}>{saving ? "Saving…" : "Save boy"}</button></div></form>;
+  return <form className="record-form" onSubmit={onSubmit}><label className="full"><span>Boy name *</span><input name="name" required autoFocus placeholder="Full name" /></label><label><span>Contact number</span><input name="contact" inputMode="tel" maxLength={24} placeholder="Mobile number" /></label><label><span>Mentor *</span><select name="mentorId" required defaultValue=""><option value="" disabled>Select mentor</option>{mentors.map((mentor) => <option key={mentor.id} value={mentor.id}>{mentor.name}</option>)}</select></label><label><span>College</span><input name="college" placeholder="e.g. NITW" /></label><HostelFields /><label><span>Branch</span><input name="branch" placeholder="e.g. CSE" /></label><label><span>Section</span><input name="section" placeholder="e.g. A" /></label><label><span>Status</span><select name="status" defaultValue="Active"><option>Active</option><option>Passive</option><option>Dropped</option></select></label><label className="full"><span>Initial mentor comment</span><textarea name="comment" rows={3} maxLength={1500} placeholder="Interest, background or next follow-up step…" /></label><div className="form-actions full"><button className="primary-button large-action" type="submit" disabled={saving}>{saving ? "Saving…" : "Save boy"}</button></div></form>;
 }
 
 function ProgramForm({ programTypes, program, onSubmit, saving }: { programTypes: ProgramType[]; program?: Program; onSubmit: (event: FormEvent<HTMLFormElement>) => void; saving: boolean }) {

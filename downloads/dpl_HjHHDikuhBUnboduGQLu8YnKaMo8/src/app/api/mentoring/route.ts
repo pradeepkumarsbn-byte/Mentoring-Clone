@@ -1,12 +1,13 @@
 export const maxDuration = 180;
 import { bridgeRequest, bridgeUrl } from "../../connection";
+import { normalizeBridgeState } from "../../bridge-state";
 export const dynamic = "force-dynamic";
 
 import { chatGPTSignInPath, getChatGPTUser } from "../../chatgpt-auth";
 
 type Action =
-  | { action: "add_boy"; name?: unknown; contact?: unknown; college?: unknown; hostel?: unknown; branch?: unknown; section?: unknown; status?: unknown; mentorId?: unknown; comment?: unknown }
-  | { action: "update_boy"; boyId?: unknown; contact?: unknown; college?: unknown; hostel?: unknown; branch?: unknown; section?: unknown; status?: unknown; mentorId?: unknown; comment?: unknown }
+  | { action: "add_boy"; name?: unknown; contact?: unknown; college?: unknown; hostel?: unknown; floor?: unknown; branch?: unknown; section?: unknown; status?: unknown; mentorId?: unknown; comment?: unknown }
+  | { action: "update_boy"; boyId?: unknown; contact?: unknown; college?: unknown; hostel?: unknown; floor?: unknown; branch?: unknown; section?: unknown; status?: unknown; mentorId?: unknown; comment?: unknown }
   | { action: "delete_boy"; boyId?: unknown }
   | { action: "add_program"; name?: unknown; programTypeId?: unknown; date?: unknown; venue?: unknown; speaker?: unknown }
   | { action: "update_program"; programId?: unknown; name?: unknown; programTypeId?: unknown; date?: unknown; venue?: unknown; speaker?: unknown }
@@ -69,7 +70,7 @@ async function callBridge(payload: Record<string, unknown>) {
  return bridgeRequest(url,payload);
 }
 
-async function authorize(): Promise<{ viewer?: Viewer; response?: Response }> {
+async function authorize(): Promise<{ viewer?: Viewer; response?: Response; backendVersion?: unknown; capabilities?: unknown }> {
   const user = await getChatGPTUser();
   if (!user) {
     return {
@@ -90,6 +91,8 @@ async function authorize(): Promise<{ viewer?: Viewer; response?: Response }> {
   }
 
   return {
+    backendVersion: access.backendVersion,
+    capabilities: access.capabilities,
     viewer: {
       email: user.email,
       name: typeof access.name === "string" && access.name.trim() ? access.name.trim() : user.displayName,
@@ -102,12 +105,25 @@ export async function GET() {
   try {
     const authorization = await authorize();
     if (authorization.response) return authorization.response;
-    const state = await callBridge({ action: "get_state" });
+    const state = normalizeBridgeState(await callBridge({ action: "get_state" }));
     if (!isState(state)) throw new Error("The Google Sheet returned an invalid response.");
     return json({ ...state, viewer: authorization.viewer });
   } catch (error) {
     console.error("mentoring Sheet GET failed", error);
-    return json({ error: "Google Sheets is responding slowly or is temporarily unavailable. Any last loaded records remain visible; automatic refresh will try again." }, 502);
+    const message = error instanceof Error ? error.message : "";
+    // Only expose recognized configuration failures, never arbitrary backend text
+    // that could contain private URLs, credentials, or spreadsheet records.
+    const missingSheet = /^Missing sheet: (Access|Mentors|ProgramTypes|Boys|Programs|Attendance|Invitations|Calendar|WebsiteContent|WebsiteSettings)$/.exec(message);
+    const detail = missingSheet
+      ? `The spreadsheet tab "${missingSheet[1]}" is missing or named differently. Correct its name in the connected spreadsheet.`
+      : /Deploy as a Web app|Google denied access/.test(message)
+        ? "Google rejected the spreadsheet connection. Check the Apps Script deployment URL and access settings."
+        : /HTTP 404/.test(message)
+          ? "The Apps Script endpoint was not found. Check the configured deployment URL."
+          : /invalid response/.test(message)
+            ? "The spreadsheet backend returned an unexpected data format. Check that its version matches this app."
+            : "The spreadsheet request failed or timed out. Retry to reconnect; any previously loaded records remain visible.";
+    return json({ error: detail }, 502);
   }
 }
 
@@ -121,11 +137,20 @@ export async function POST(request: Request) {
 
     const body = await request.json() as Action;
     if (!body || !allowedActions.has(body.action)) return json({ error: "Unsupported action." }, 400);
+    // The legacy deployment corrupts columns in several write actions.
+    // The corrected deployment identifies itself in the existing access check.
+    if (authorization.backendVersion !== "header-mapping-v1") {
+      return json({ error: "Saving is paused until the corrected Apps Script is deployed. Existing records remain available. Update the existing deployment to the repaired version, then retry." }, 503);
+    }
+    if ((body.action === "add_boy" || body.action === "update_boy") && body.floor !== undefined
+      && !(Array.isArray(authorization.capabilities) && authorization.capabilities.includes("boy-floor-v1"))) {
+      return json({ error: "Deploy the latest Apps Script with Floor support before saving boy details. This prevents losing the selected floor." }, 503);
+    }
     if (body.action === "update_website_content" && authorization.viewer?.role !== "admin") {
       return json({ error: "Only an Admin can update website wording." }, 403);
     }
 
-    const result = await callBridge({ ...(body as unknown as Record<string, unknown>), updatedBy: authorization.viewer?.email });
+    const result = normalizeBridgeState(await callBridge({ ...(body as unknown as Record<string, unknown>), updatedBy: authorization.viewer?.email }));
     if (!isState(result)) throw new Error("The Google Sheet returned an invalid response.");
     return json({ ok: true, state: { ...result, viewer: authorization.viewer } });
   } catch (error) {
