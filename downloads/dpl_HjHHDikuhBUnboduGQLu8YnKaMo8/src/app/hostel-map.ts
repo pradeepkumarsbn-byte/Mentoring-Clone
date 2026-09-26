@@ -48,7 +48,6 @@ export function calculateRoomCoverage(boys: readonly MapBoy[]) {
   }
   for (const boy of unique.values()) {
     if (conflicts.has(boy.id)) { unmapped.push({boy,reason:'Conflicting copies of the same student ID'}); continue; }
-    if (boy.status === 'Dropped') continue;
     const key = getRoomKey(boy.floor,boy.hostel);
     if (!key) { unmapped.push({boy,reason: !boy.floor?.trim() ? 'Floor not assigned' : !normalizeFloor(boy.floor) ? 'Invalid floor' : 'Missing or invalid room (use 1–61)'}); continue; }
     byKey.get(key)!.boys.push(boy);

@@ -2,6 +2,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {calculateRoomCoverage,normalizeFloor,normalizeRoomNumber,FLOORS,OUT_ROOM_GROUPS,IN_ROOM_GROUPS} from './hostel-map.ts';
 const boy=(id,floor='B0',hostel='1',extra={})=>({id,name:'Same name',floor,hostel,status:'Active',...extra});
+test('dropping a boy preserves registration, coverage and status after reload',()=>{
+ const active=boy('1');
+ const before=calculateRoomCoverage([active]);
+ const after=calculateRoomCoverage(JSON.parse(JSON.stringify([{...active,status:'Dropped'}])));
+ assert.deepEqual(after.summary,before.summary);
+ assert.equal(after.byKey.get('B0-1').status,'partial');
+ assert.equal(after.byKey.get('B0-1').boys[0].status,'Dropped');
+});
 test('all ten floors contain exactly 61 unique physical rooms',()=>{
  const layout=[...OUT_ROOM_GROUPS.flat(),...IN_ROOM_GROUPS.flat()];
  assert.equal(layout.length,61);assert.equal(new Set(layout).size,61);
@@ -31,6 +39,6 @@ test('safe normalization, duplicate IDs, invalid locations and dropped records',
  assert.equal(normalizeFloor(' b3 '),'B3');assert.equal(normalizeRoomNumber(' 23 '),23);assert.equal(normalizeRoomNumber(23),23);
  for(const v of ['',null,{},0,62,1.5,'1e1','0x10']) assert.equal(normalizeRoomNumber(v),null);
  const s=calculateRoomCoverage([boy('1'),boy('1'),boy('2','B0','1',{status:'Dropped'}),boy('3','B10'),boy('4','B2','62'),boy('5','B0','1',{status:'Passive'})]);
- assert.equal(s.byKey.get('B0-1').boys.length,2);assert.equal(s.unmapped.length,2);
+ assert.equal(s.byKey.get('B0-1').boys.length,3);assert.equal(s.unmapped.length,2);
  const conflict=calculateRoomCoverage([boy('1'),boy('1','B2')]);assert.equal(conflict.summary.mapped,0);assert.equal(conflict.unmapped.length,1);
 });

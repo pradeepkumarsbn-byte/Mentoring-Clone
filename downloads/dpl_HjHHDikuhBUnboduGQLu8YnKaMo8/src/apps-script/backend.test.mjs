@@ -11,15 +11,15 @@ const schemas={
  'Website Content':['Key','Section','Label','Value','Updated On','Updated By'],'Website Settings':['Setting ID','Value']
 };
 function fixture(reorder=false){
- const sheets={};let sequence=0,held=false;
+ const sheets={};let sequence=0,held=false;const metrics={opens:0,reads:0,writes:0};
  for(const [name,headers] of Object.entries(schemas)){
   const rows=[reorder?[...headers].reverse():[...headers]];
-  sheets[name]={rows,getDataRange:()=>({getValues:()=>rows.map(r=>[...r])}),appendRow:r=>rows.push([...r]),deleteRow:r=>rows.splice(r-1,1),getRange:(r,c)=>({setValue:v=>{rows[r-1][c-1]=v;}})};
+  sheets[name]={rows,getDataRange:()=>({getValues:()=>{metrics.reads++;return rows.map(r=>[...r]);}}),appendRow:r=>rows.push([...r]),deleteRow:r=>rows.splice(r-1,1),getRange:(r,c)=>({setValue:v=>{rows[r-1][c-1]=v;},setValues:values=>{metrics.writes++;values[0].forEach((v,i)=>{rows[r-1][c-1+i]=v;});}})};
  }
  const seed=(name,fields)=>sheets[name].appendRow(sheets[name].rows[0].map(h=>fields[h]??''));
  seed('Mentors',{'Mentor ID':'M1','Mentor Name':'Mentor'});seed('ProgramTypes',{'Program Type ID':'PT-001','Program Name':'DYS0'});
  const context=vm.createContext({PropertiesService:{getScriptProperties:()=>({getProperty:k=>k==='MENTORING_SHEETS_TOKEN'?'test-token':'test-sheet'})},
- SpreadsheetApp:{openById:()=>({getSheetByName:n=>sheets[n]}),flush:()=>{}},
+ SpreadsheetApp:{openById:()=>{metrics.opens++;return {getSheetByName:n=>sheets[n]};},flush:()=>{}},
  LockService:{getScriptLock:()=>({tryLock:()=>{held=true;return true;},hasLock:()=>held,releaseLock:()=>{held=false;}})},
  Utilities:{getUuid:()=>`uuid-${++sequence}`,formatDate:d=>d.toISOString().slice(0,10)},Session:{getScriptTimeZone:()=> 'UTC'},
  ContentService:{MimeType:{JSON:'json'},createTextOutput:s=>({setMimeType:()=>JSON.parse(s)})}});
@@ -28,7 +28,7 @@ function fixture(reorder=false){
  const objects=name=>sheets[name].rows.slice(1).map(r=>Object.fromEntries(sheets[name].rows[0].map((h,i)=>[h,r[i]])));
  const program=()=>call('add_program',{name:'DYS 0',programTypeId:'PT-001',date:'2026-09-21',venue:'Room 204',speaker:'BNP'});
  const boy=()=>call('add_boy',{name:'Student',mentorId:'M1',contact:'0123',hostel:'204'});
- return {sheets,seed,call,objects,program,boy,raw:contents=>context.doPost({postData:{contents}}),locked:()=>held};
+ return {metrics,sheets,seed,call,objects,program,boy,raw:contents=>context.doPost({postData:{contents}}),locked:()=>held};
 }
 for(const reorder of [false,true]) test(`program create/edit/delete and dependent cleanup, reordered=${reorder}`,()=>{
  const f=fixture(reorder);const result=f.program();assert.equal(result.ok,true);assert.equal(result.programs[0].name,'DYS 0');
@@ -86,8 +86,39 @@ test('floor persists through creation, editing, clearing and state reload',()=>{
  result=f.call('update_boy',{boyId,mentorId:'M1',floor:'',hostel:'21'});
  assert.equal(result.boys[0].floor,'');assert.equal(result.boys[0].hostel,'21');
 });
+test('combined access and save returns confirmed state and verified author',()=>{
+ const f=fixture();
+ f.seed('Access',{Email:'mentor@example.com',Name:'Mentor',Role:'mentor',Active:'Yes'});
+ const result=f.call('check_access',{email:'mentor@example.com',operation:{action:'add_boy',name:'Registered',mentorId:'M1',updatedBy:'spoofed@example.com'}});
+ assert.equal(result.allowed,true);assert.equal(result.state.boys.length,1);
+ assert.equal(result.state.boys[0].createdBy,'mentor@example.com');
+ assert.equal(f.call('check_access',{email:'mentor@example.com',includeState:true}).state.boys.length,1);
+ // Each request sees current sheet data, including revoked access.
+ f.sheets.Access.rows[1][3]='No';
+ const denied=f.call('check_access',{email:'mentor@example.com',operation:{action:'add_boy',name:'Denied',mentorId:'M1'}});
+ assert.equal(denied.allowed,false);assert.equal(denied.state,undefined);assert.equal(f.objects('Boys').length,1);
+});
+test('combined writes reject unapproved users and non-admin website edits',()=>{
+ const f=fixture();
+ const denied=f.call('check_access',{email:'unknown@example.com',includeState:true,operation:{action:'add_boy',name:'Denied',mentorId:'M1'}});
+ assert.equal(denied.allowed,false);assert.equal(denied.state,undefined);assert.equal(f.objects('Boys').length,0);
+ f.seed('Access',{Email:'mentor@example.com',Role:'mentor',Active:'Yes'});
+ f.seed('Website Content',{Key:'title',Value:'Original'});
+ assert.equal(f.call('check_access',{email:'mentor@example.com',operation:{action:'update_website_content',values:{title:'Changed'}}}).ok,false);
+ assert.equal(f.objects('Website Content')[0].Value,'Original');
+});
 test('legacy room values stay intact during unrelated profile changes',()=>{
  const f=fixture();f.boy();const before=f.objects('Boys')[0];
  const result=f.call('update_boy',{boyId:before['Boy ID'],mentorId:'M1',floor:'',hostel:'204',comment:'Follow-up'});
  assert.equal(result.ok,true);assert.equal(result.boys[0].hostel,'204');assert.equal(result.boys[0].floor,'');
+});
+
+test('a save opens the workbook once and batches only adjacent updated cells',()=>{
+ const f=fixture();f.boy();const boyId=f.objects('Boys')[0]['Boy ID'];
+ f.metrics.opens=0;f.metrics.reads=0;f.metrics.writes=0;
+ const result=f.call('update_boy',{boyId,mentorId:'M1',contact:'12',hostel:'21',floor:'B3',status:'Dropped'});
+ assert.equal(result.ok,true);assert.equal(f.metrics.opens,1);
+ assert.ok(f.metrics.writes<=4, 'Changed fields should use at most four adjacent blocks');
+ assert.ok(f.metrics.reads<=12, 'Validation should reuse table reads within the request');
+ assert.equal(result.boys[0].status,'Dropped');assert.equal(result.boys[0].hostel,'21');
 });

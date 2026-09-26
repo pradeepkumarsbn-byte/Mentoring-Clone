@@ -47,7 +47,7 @@ export async function bridgeRequest(url:string,payload:Record<string,unknown>){
  const token=process.env.MENTORING_SHEETS_TOKEN;
  if(!token)throw new Error('Connection key is not configured.');
  const endpoint=validBridgeUrl(url);
- const readOnly=typeof payload.action==='string'&&readActions.has(payload.action);
+ const readOnly=!payload.operation&&typeof payload.action==='string'&&readActions.has(payload.action);
  // Coalesce only simultaneous, identical reads. Never cache an access decision
  // or a completed response, and never share reads across connection keys/users.
  if(!readOnly){

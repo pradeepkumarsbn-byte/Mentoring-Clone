@@ -14,13 +14,30 @@ const TABS = Object.freeze({
   calendar: "Calendar",
 });
 
+// Cache only within one execution, never across users or requests.
+let requestSpreadsheet;
+let requestTables = {};
 function doPost(event) {
+  requestSpreadsheet = null;
+  requestTables = {};
   let lock;
   try {
-    const body = JSON.parse((event && event.postData && event.postData.contents) || "{}");
+    let body = JSON.parse((event && event.postData && event.postData.contents) || "{}");
     if (!safeEqual_(String(body.token || ""), MENTORING_TOKEN)) throw new Error("Unauthorized request.");
-    const action = String(body.action || "");
-    if (action === "check_access") return output_(checkAccess_(body.email));
+    let action = String(body.action || "");
+    let access;
+    if (action === "check_access") {
+      access = checkAccess_(body.email);
+      if (!access.allowed) return output_(access);
+      if (!body.operation) {
+        if (body.includeState === true) access.state = state_();
+        return output_(access);
+      }
+      const email = text_(body.email).toLowerCase();
+      body = Object.assign({}, body.operation, { updatedBy: email });
+      action = String(body.action || "");
+      if (action === "update_website_content" && access.role !== "admin") throw new Error("Only an Admin can update website wording.");
+    }
     if (action === "get_state") return output_(state_());
 
     lock = LockService.getScriptLock();
@@ -40,7 +57,11 @@ function doPost(event) {
       default: throw new Error("Unsupported action.");
     }
     SpreadsheetApp.flush();
-    return output_(state_());
+    // Re-read after writes, including duplicate-row cleanup and recalculation.
+    requestTables = {};
+    const state = state_();
+    if (access) { access.state = state; return output_(access); }
+    return output_(state);
   } catch (error) {
     return output_({ ok: false, error: error && error.message ? error.message : "The Sheet request failed." });
   } finally {
@@ -244,12 +265,14 @@ function assertProgramTypeAttendanceUnique_(programId, targetTypeId) {
   if (conflict) throw new Error("Changing this Program Type would create duplicate Present credit for one or more boys.");
 }
 function sheet_(name) {
-  const sheet = SpreadsheetApp.openById(MENTORING_SPREADSHEET_ID).getSheetByName(name);
+  if (!requestSpreadsheet) requestSpreadsheet = SpreadsheetApp.openById(MENTORING_SPREADSHEET_ID);
+  const sheet = requestSpreadsheet.getSheetByName(name);
   if (!sheet) throw new Error("Missing Sheet tab: " + name);
   return sheet;
 }
 
 function table_(name) {
+  if (requestTables[name]) return requestTables[name];
   const sheet = sheet_(name);
   const values = sheet.getDataRange().getValues();
   const headers = values.length ? values[0].map(function(value) { const key = text_(value); return ["Room No","Room No.","Room Number"].indexOf(key) >= 0 ? "Hostel Name" : key; }) : [];
@@ -258,7 +281,7 @@ function table_(name) {
     headers.forEach(function (header, index) { object[header] = row[index]; });
     return object;
   });
-  return { sheet: sheet, headers: headers, objects: objects, values: values };
+  return requestTables[name] = { sheet: sheet, headers: headers, objects: objects, values: values };
 }
 
 function rows_(name) { return table_(name).objects; }
@@ -299,6 +322,7 @@ function deleteMatches_(name, header, value) { deleteCompound_(name, (function (
 function deleteCompound_(name, match) {
   const sheet = sheet_(name);
   findRows_(name, match).sort(function (a, b) { return b.row - a.row; }).forEach(function (item) { sheet.deleteRow(item.row); });
+  delete requestTables[name];
 }
 
 function indexBy_(rows, key, value) { const result = {}; rows.forEach(function (row) { result[text_(row[key])] = text_(row[value]); }); return result; }
@@ -351,12 +375,23 @@ function appendObject_(name,fields) {
   const row = table.headers.map(function() { return ""; });
   columns_(table,fields).forEach(function(item) { row[item.column] = literal_(fields[item.header]); });
   table.sheet.appendRow(row);
+  delete requestTables[name];
 }
 function updateObject_(name,row,fields) {
   const table = table_(name);
-  const columns = columns_(table,fields);
+  const columns = columns_(table,fields).sort(function(a,b) { return a.column-b.column; });
   // Only touch requested fields; preserve totals, formulas and unrelated cells.
-  columns.forEach(function(item) { table.sheet.getRange(row,item.column+1).setValue(literal_(fields[item.header])); });
+  // Batch adjacent changed cells without overwriting gaps or formula columns.
+  const groups = [];
+  columns.forEach(function(item) {
+    const group = groups[groups.length-1];
+    if (group && group[group.length-1].column+1 === item.column) group.push(item);
+    else groups.push([item]);
+  });
+  groups.forEach(function(group) {
+    table.sheet.getRange(row,group[0].column+1,1,group.length).setValues([group.map(function(item) { return literal_(fields[item.header]); })]);
+  });
+  delete requestTables[name];
 }
 function doGet() { return output_({ok:true,status:"healthy",backendVersion:"header-mapping-v1"}); }
 

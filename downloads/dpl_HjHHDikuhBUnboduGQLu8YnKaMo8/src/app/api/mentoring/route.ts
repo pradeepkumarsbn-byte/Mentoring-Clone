@@ -70,7 +70,7 @@ async function callBridge(payload: Record<string, unknown>) {
  return bridgeRequest(url,payload);
 }
 
-async function authorize(): Promise<{ viewer?: Viewer; response?: Response; backendVersion?: unknown; capabilities?: unknown }> {
+async function authorize(operation?: Action): Promise<{ viewer?: Viewer; response?: Response; backendVersion?: unknown; capabilities?: unknown; state?: unknown }> {
   const user = await getChatGPTUser();
   if (!user) {
     return {
@@ -81,7 +81,9 @@ async function authorize(): Promise<{ viewer?: Viewer; response?: Response; back
     };
   }
 
-  const access = await callBridge({ action: "check_access", email: user.email });
+  // New backends authorize and execute in one round trip. Older deployments
+  // ignore these optional fields and retain the existing two-call path.
+  const access = await callBridge({ action: "check_access", email: user.email, ...(operation ? { operation } : { includeState: true }) });
   if (access.allowed !== true) {
     return {
       response: json({
@@ -91,6 +93,7 @@ async function authorize(): Promise<{ viewer?: Viewer; response?: Response; back
   }
 
   return {
+    state: access.state,
     backendVersion: access.backendVersion,
     capabilities: access.capabilities,
     viewer: {
@@ -105,7 +108,7 @@ export async function GET() {
   try {
     const authorization = await authorize();
     if (authorization.response) return authorization.response;
-    const state = normalizeBridgeState(await callBridge({ action: "get_state" }));
+    const state = normalizeBridgeState(authorization.state ?? await callBridge({ action: "get_state" }));
     if (!isState(state)) throw new Error("The Google Sheet returned an invalid response.");
     return json({ ...state, viewer: authorization.viewer });
   } catch (error) {
@@ -129,14 +132,14 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    const authorization = await authorize();
-    if (authorization.response) return authorization.response;
     if (!request.headers.get("content-type")?.includes("application/json")) {
       return json({ error: "JSON is required." }, 415);
     }
 
     const body = await request.json() as Action;
     if (!body || !allowedActions.has(body.action)) return json({ error: "Unsupported action." }, 400);
+    const authorization = await authorize(body);
+    if (authorization.response) return authorization.response;
     // The legacy deployment corrupts columns in several write actions.
     // The corrected deployment identifies itself in the existing access check.
     if (authorization.backendVersion !== "header-mapping-v1") {
@@ -150,7 +153,7 @@ export async function POST(request: Request) {
       return json({ error: "Only an Admin can update website wording." }, 403);
     }
 
-    const result = normalizeBridgeState(await callBridge({ ...(body as unknown as Record<string, unknown>), updatedBy: authorization.viewer?.email }));
+    const result = normalizeBridgeState(authorization.state ?? await callBridge({ ...(body as unknown as Record<string, unknown>), updatedBy: authorization.viewer?.email }));
     if (!isState(result)) throw new Error("The Google Sheet returned an invalid response.");
     return json({ ok: true, state: { ...result, viewer: authorization.viewer } });
   } catch (error) {

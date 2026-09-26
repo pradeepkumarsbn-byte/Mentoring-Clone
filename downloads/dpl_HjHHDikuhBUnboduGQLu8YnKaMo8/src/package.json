@@ -10,7 +10,7 @@
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
-    "test": "node --experimental-strip-types --test app/connection.test.mjs app/bridge-state.test.mjs app/hostel-map.test.mjs apps-script/backend.test.mjs"
+    "test": "node --experimental-strip-types --test app/connection.test.mjs app/bridge-state.test.mjs app/hostel-map.test.mjs app/invitation-eligibility.test.mjs apps-script/backend.test.mjs"
   },
   "dependencies": {
     "next": "16.3.4",

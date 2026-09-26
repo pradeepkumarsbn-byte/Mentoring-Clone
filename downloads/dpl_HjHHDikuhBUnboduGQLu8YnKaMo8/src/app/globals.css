@@ -817,3 +817,5 @@ footer { width: min(1180px, calc(100% - 44px)); margin: 0 auto; padding: 22px 0 
 @media(max-width:1000px) { .analytics-studio .analytics-charts { grid-template-columns:1fr; } .analytics-heading { flex-wrap:wrap; } }
 @media(max-width:640px) { .analytics-studio { padding:15px; border-radius:20px; } .analytics-toolbar { align-items:stretch; flex-direction:column; } .analytics-mentor { justify-content:space-between; } .analytics-studio .panel { padding:18px; } .analytics-studio .analytics-metrics { grid-template-columns:1fr; } .analytics-live { align-self:start; } .analytics-periods button { flex:1; } .chart-legend { display:none; } .chart-scale { left:14px; top:145px; } }
 @media(prefers-reduced-motion:reduce) { .analytics-studio * { transition:none !important; } }
+
+.map-dropped-label { display: inline-block; color: #8a3232; background: #fff0ed; border-radius: 4px; padding: 2px 4px; font-weight: 700; }

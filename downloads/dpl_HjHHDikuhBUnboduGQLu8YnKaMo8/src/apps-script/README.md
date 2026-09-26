@@ -8,7 +8,7 @@ The existing room value remains in `Hostel Name` (internally `hostel`); no secon
 
 Deploy the updated `Code.private.gs` using the existing deployment, as described below. It advertises `boy-floor-v1` in its capabilities. The app rejects boy saves to older backends instead of silently losing floor information. Other actions retain the previous backend compatibility check.
 
-Active and Passive boys count; Dropped boys do not. Unique student IDs are counted once; conflicting copies are flagged as unmapped. Missing/invalid floor or room data stays unmapped. Counts of 0, 1, 2 and >2 produce Not covered, Partial, Full and Data issue respectively. Coverage caps each room at two places. No coverage status is stored and no per-room requests are made.
+All registered boys count, including Dropped boys. Dropped registrations retain their room and are explicitly labelled in the map and room details. Unique student IDs are counted once; conflicting copies are flagged as unmapped. Missing/invalid floor or room data stays unmapped. Counts of 0, 1, 2 and >2 produce Not covered, Partial, Full and Data issue respectively. Coverage caps each room at two places. No coverage status is stored and no per-room requests are made.
 
 Existing out-of-range room values remain available in Edit as an existing-value option, so unrelated edits preserve them. Assigning a new floor requires a valid room (1–61). The map updates from every successful refresh/save. Its room details link directly to the existing boy profile for correction.
 
@@ -34,3 +34,9 @@ The local app deliberately rejects writes to the known-broken legacy backend. Lo
 Writes use a script lock and named columns. Updates preserve unrelated fields and formulas. Parent existence and dependent schemas are checked before deletion. Google Sheets has no transaction spanning these operations: service failures may still interrupt a save. Writes are never automatically replayed, because a timed-out request may already have saved. No network request can be guaranteed never to fail.
 
 Google deployment instructions: https://developers.google.com/apps-script/concepts/deployments
+
+## Save performance update
+
+Deploy `Code.gs` to the existing Apps Script web app after preserving the existing `MENTORING_SHEETS_TOKEN` and `MENTORING_SPREADSHEET_ID` Script Properties. The app now sends authorization and the operation together; this backend checks the current allowlist and admin role, then returns confirmed state in one round trip. Older backends remain supported through the original two-call path. Combined writes are never retried or coalesced.
+
+The workbook is opened once per execution, table reads are reused during validation, and adjacent changed cells are written in blocks without overwriting intervening formulas. Reads are refreshed after writes. No spreadsheet migration is required. Actual save latency must be measured after both deployments; no production timing is claimed by the simulated tests.

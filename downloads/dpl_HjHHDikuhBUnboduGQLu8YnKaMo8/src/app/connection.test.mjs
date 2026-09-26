@@ -91,6 +91,15 @@ test('Apps Script bridge response handling', async (t) => {
     assert.equal(calls, 1);
   });
 
+  await t.test('combined authorization and save is never retried or coalesced', async () => {
+    let calls = 0;
+    globalThis.fetch = async () => { calls++; return new Response(null, { status: 503 }); };
+    const payload = { action: 'check_access', email: 'mentor@example.com', operation: { action: 'add_boy' } };
+    const results = await Promise.allSettled([bridgeRequest(url, payload), bridgeRequest(url, payload)]);
+    assert.ok(results.every(result => result.status === 'rejected'));
+    assert.equal(calls, 2);
+  });
+
   await t.test('coalesces simultaneous reads but does not cache completed reads', async () => {
     let calls = 0;
     globalThis.fetch = async () => { calls++; return Response.json({ ok: true }); };
