@@ -11,15 +11,19 @@
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
-    "test": "node --experimental-strip-types --test app/connection.test.mjs app/bridge-state.test.mjs app/hostel-map.test.mjs app/invitation-eligibility.test.mjs apps-script/backend.test.mjs"
+    "test": "node --experimental-strip-types --test app/connection.test.mjs app/bridge-state.test.mjs app/hostel-map.test.mjs app/invitation-eligibility.test.mjs apps-script/backend.test.mjs tests/*.test.mjs"
   },
   "dependencies": {
+    "@supabase/ssr": "^0.12.7",
+    "@supabase/supabase-js": "^2.117.2",
     "next": "16.3.4",
     "next-auth": "^5.0.0-beta.32",
+    "pg": "^8.23.0",
     "react": "19.2.6",
     "react-dom": "19.2.6"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.8",
     "@tailwindcss/postcss": "4.2.1",
     "@types/node": "22.19.19",
     "@types/react": "19.2.14",

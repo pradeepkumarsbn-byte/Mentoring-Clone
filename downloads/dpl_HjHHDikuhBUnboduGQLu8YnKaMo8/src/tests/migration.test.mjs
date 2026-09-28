@@ -1,0 +1,9 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {prepareImport} from '../scripts/migration-data.mjs';
+function fixture(){const state={mentors:[{id:'m',name:'Mentor'}],programTypes:[{id:'t',name:'Session'}],boys:[{id:'b',name:'Boy',mentorId:'m'}],programs:[{id:'p',programTypeId:'t'}],attendance:[{id:'a',boyId:'b',programId:'p',mentorId:'m'}],invitations:[],calendarEvents:[],websiteContent:{title:'Hello'},websiteSettings:{theme:'green'}};
+ const tabs=['Mentors','ProgramTypes','Boys','Programs','Attendance','Invitations','Calendar','Website Content','Website Settings'];const keys=Object.keys(state);
+ const sheets=tabs.map((name,i)=>({name,values:[['ID','Name','Extra'],...(Array.isArray(state[keys[i]])?state[keys[i]].map(r=>[r.id,r.name||'','preserve']):Object.keys(state[keys[i]]).map(id=>[id,'','preserve']))]}));
+ sheets.push({name:'Access',values:[['Email','Name','Role','Active'],['ADMIN@example.com','Admin','Admin','Yes']]});return {state,snapshot:{sheets}};}
+test('import preserves source metadata, IDs, permissions and values',()=>{const {snapshot,state}=fixture();const p=prepareImport(snapshot,state);assert.equal(p.records.find(r=>r.kind==='boys').data.sourceRow.Extra,'preserve');assert.equal(p.access[0].email,'admin@example.com');assert.equal(p.access[0].active,true);assert.equal(p.records.find(r=>r.kind==='websiteContent').data.value,'Hello');});
+test('migration refuses orphans, duplicate session rows and missing active admin',()=>{let f=fixture();f.state.boys[0].mentorId='missing';assert.throws(()=>prepareImport(f.snapshot,f.state),/Orphan/);f=fixture();f.state.attendance.push({...f.state.attendance[0]});assert.throws(()=>prepareImport(f.snapshot,f.state),/duplicate/i);f=fixture();f.snapshot.sheets.at(-1).values[1][3]='No';assert.throws(()=>prepareImport(f.snapshot,f.state),/Active admin/);});

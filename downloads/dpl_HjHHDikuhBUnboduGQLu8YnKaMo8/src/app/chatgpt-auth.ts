@@ -1,5 +1,13 @@
 import { auth, authConfigured } from "../auth";
+import { useSupabase } from '../lib/backend';
+import { mentoringClient } from '../lib/supabase';
 export async function getChatGPTUser() {
+  if(useSupabase()) {
+    const client=await mentoringClient();const {data,error}=await client.auth.getClaims();
+    if(error||typeof data?.claims.email!=='string') return null;
+    const email=data.claims.email.trim().toLowerCase();
+    return {email,displayName:email,fullName:null};
+  }
   if (!authConfigured()) return null;
   const session = await auth();
   const email = session?.user?.email?.trim().toLowerCase();

@@ -1,6 +1,10 @@
+.git
 tmp/
 **/*.private.gs
-**/.env*
-**/node_modules/
-**/.next/
 **/*.tsbuildinfo
+**/node_modules
+**/.next
+**/.migration-private
+**/.migration-private/**
+.env*
+**/.env*

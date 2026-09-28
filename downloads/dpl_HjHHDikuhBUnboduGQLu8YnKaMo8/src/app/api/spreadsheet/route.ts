@@ -1,8 +1,10 @@
 import { getChatGPTUser } from '../../chatgpt-auth';
 import { bridgeRequest, bridgeUrl } from '../../connection';
+import { useSupabase } from '../../../lib/backend';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 90;
 export async function GET(request:Request){
+ if(useSupabase())return Response.redirect(new URL('/manage',request.url));
  const user=await getChatGPTUser();
  if(!user)return new Response('Please sign in.',{status:401});
  try{

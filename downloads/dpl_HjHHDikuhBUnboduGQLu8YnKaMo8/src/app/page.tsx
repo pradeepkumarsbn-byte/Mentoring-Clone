@@ -1,6 +1,8 @@
 "use client";
 
 import { eligibleInvitees } from "./invitation-eligibility";
+import { applyStatePatch, type StatePatch } from "./state-patch";
+import ProfileFiles from "./profile-files";
 import HostelMapView from "./hostel-map-view";
 import HostelFields from "./hostel-fields";
 import OverviewStats from "./overview-stats";
@@ -17,7 +19,7 @@ type Attendance = { id: string; programId: string; boyId: string; mentorId: stri
 type Invitation = { id: string; programId: string; boyId: string; mentorId: string; response: string; updatedAt: string; updatedBy: string };
 type CalendarEvent = { id: string; title: string; startDate: string; endDate: string; type: string; availability: string; semester: string; scope: string; note: string; source: string };
 type Viewer = { email: string; name: string; role: "admin" | "mentor" };
-type State = { mentors: Mentor[]; programTypes: ProgramType[]; boys: Boy[]; programs: Program[]; attendance: Attendance[]; invitations: Invitation[]; calendarEvents: CalendarEvent[]; websiteContent: Record<string, string>; websiteSettings: Record<string, string>; refreshedAt: string; viewer?: Viewer };
+type State = { backend?: "supabase"; mentors: Mentor[]; programTypes: ProgramType[]; boys: Boy[]; programs: Program[]; attendance: Attendance[]; invitations: Invitation[]; calendarEvents: CalendarEvent[]; websiteContent: Record<string, string>; websiteSettings: Record<string, string>; refreshedAt: string; viewer?: Viewer };
 
 const emptyState: State = { mentors: [], programTypes: [], boys: [], programs: [], attendance: [], invitations: [], calendarEvents: [], websiteContent: {}, websiteSettings: {}, refreshedAt: "" };
 const nav: { id: View; label: string }[] = [
@@ -312,14 +314,15 @@ export default function Home() {
     setBusy(key);
     setError("");
     try {
-      const response = await fetch("/api/mentoring", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, ...payload }) });
-      const result = await response.json() as { error?: string; state?: State; signInPath?: string };
+      const response = await fetch("/api/mentoring", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, ...payload, requestId: crypto.randomUUID() }) });
+      const result = await response.json() as { error?: string; state?: State; patch?: StatePatch; signInPath?: string };
       if (response.status === 401 && result.signInPath) {
         window.location.assign(result.signInPath);
         return false;
       }
-      if (!response.ok || !result.state) throw new Error(result.error || "The record could not be saved.");
-      setData(result.state);
+      if (!response.ok || (!result.state && !result.patch)) throw new Error(result.error || "The record could not be saved.");
+      if(result.patch) setData(current => applyStatePatch(current,result.patch!));
+      else setData(result.state!);
       setToast(success);
       window.setTimeout(() => setToast(""), 2200);
       failures.current = 0;
@@ -364,15 +367,15 @@ export default function Home() {
     <main className={portalClassName} style={websiteStyle(data)}>
       <header className="site-header">
         <button className="brand brand-button" onClick={() => setView("overview")} aria-label="Open mentoring overview"><span className="brand-mark">{siteSetting(data, "brand_initials", "IW").slice(0, 4)}</span><span><strong>{siteSetting(data, "brand_title", "Mentoring Hub")}</strong><small>{siteSetting(data, "brand_subtitle", "ISKCON Warangal")}</small></span></button>
-        <nav className="nav-tabs" aria-label="Primary views">{nav.filter((item) => item.id !== "content" || data.viewer?.role === "admin").map((item) => <button key={item.id} className={view === item.id ? "active" : ""} onClick={() => setView(item.id)}>{item.label}</button>)}</nav>
-        <div className="auth-cluster"><span className="private-pill"><i /> {data.viewer ? `${data.viewer.name} · ${data.viewer.role}` : "Secure sign-in"}</span>{data.viewer && <a className="sign-out-link" href="/api/auth/signout">Sign out</a>}</div>
+        <nav className="nav-tabs" aria-label="Primary views">{nav.filter((item) => item.id !== "content" || data.viewer?.role === "admin").map((item) => <button key={item.id} className={view === item.id ? "active" : ""} onClick={() => setView(item.id)}>{item.label}</button>)}{data.backend === "supabase" && data.viewer?.role === "admin" && <a href="/manage">Manage</a>}{data.backend === "supabase" && data.viewer && <a href="/auth/update-password">Change password</a>}</nav>
+        <div className="auth-cluster"><span className="private-pill"><i /> {data.viewer ? `${data.viewer.name} · ${data.viewer.role}` : "Secure sign-in"}</span>{data.viewer && <a className="sign-out-link" href={data.backend === "supabase" ? "/auth/signout" : "/api/auth/signout"}>Sign out</a>}</div>
       </header>
 
       {showAnnouncement && <aside className="announcement-banner" role="note"><span>●</span><p>{siteSetting(data, "announcement_text", "Welcome to the ISKCON Warangal youth mentoring workspace.")}</p></aside>}
 
       <div className="page-shell" id="top">
         <section className={`hero operational-hero ${showHeroDecoration ? "" : "without-decoration"}`}>
-          <div><p className="eyebrow">{siteText(data, "hero_eyebrow", "Youth mentoring · live Google Sheet")}</p><h1>{siteText(data, "hero_title_line_1", "Record it once.")}<br />{siteText(data, "hero_title_line_2", "See it everywhere.")}</h1><p className="hero-copy">{siteText(data, "hero_description", "Add boys and programs, take attendance, and build the right invitation list from one private workspace. Every save writes to the Sheet and refreshes the dashboard immediately.")}</p></div>
+          <div><p className="eyebrow">{siteText(data, "hero_eyebrow", "Youth mentoring · live Google Sheet")}</p><h1>{siteText(data, "hero_title_line_1", "Record it once.")}<br />{siteText(data, "hero_title_line_2", "See it everywhere.")}</h1><p className="hero-copy">{siteText(data, "hero_description", "Add boys and programs, take attendance, and build the right invitation list from one private workspace. Saved changes refresh the dashboard immediately.")}</p></div>
           {showQuickActions && <div className="quick-actions" aria-label="Quick actions">
             <button onClick={() => setModal("boy")}><span>＋</span><b>{siteText(data, "quick_add_boy_title", "Add boy")}</b><small>{siteText(data, "quick_add_boy_description", "Create a mentoring record")}</small></button>
             <button onClick={() => setModal("program")}><span>＋</span><b>{siteText(data, "quick_add_program_title", "Add program")}</b><small>{siteText(data, "quick_add_program_description", "Schedule a dated session")}</small></button>
@@ -484,7 +487,7 @@ function PlanningView({ data }: { data: State }) {
       eyebrow={siteText(data, "planning_eyebrow", "Academic planning")}
       title={siteText(data, "planning_title", "Plan preaching around college life")}
       copy={siteText(data, "planning_description", "See examinations, holidays and breaks together. Use the availability signals as guidance, then confirm each boy's room number and travel plans before inviting.")}
-      action={<a className="primary-button planning-sheet-link" href="/api/spreadsheet?tab=calendar" target="_blank" rel="noreferrer">Edit calendar in Sheet →</a>}
+      action={<a className="primary-button planning-sheet-link" href={data.backend === "supabase" ? "/manage?section=calendarEvents" : "/api/spreadsheet?tab=calendar"} target="_blank" rel="noreferrer">Edit calendar →</a>}
     />
 
     <div className="planning-scope-note"><span>i</span><div><strong>NIT Warangal and VNRVJIET ? 2026?27</strong><p>NIT Warangal dates cover the programs and semesters listed on each event. VNRVJIET academic dates cover B.Tech I Year (R25), except Biotechnology. Filter by institution before planning; availability is guidance, not a guarantee.</p></div></div>
@@ -722,6 +725,7 @@ function BoyProfileModal({ data, boyId, save, busy, onClose }: { data: State; bo
 
   return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) onClose(); }}><section className="modal profile-modal" role="dialog" aria-modal="true" aria-labelledby="profile-title">
     <div className="modal-head profile-head"><div className="profile-identity"><span className="profile-avatar">{initials(boy.name)}</span><div><p className="eyebrow">Boy profile · {mentorName(data, boy.mentorId)}</p><h2 id="profile-title">{boy.name}</h2><p>{boy.contact || "No contact number"} · {boy.college || "College not added"} · {boy.hostel || "Room No not added"}</p></div></div><button className="modal-close" onClick={onClose} aria-label="Close">×</button></div>
+    {data.backend === "supabase" && <ProfileFiles boyId={boy.id} />}
     <div className="profile-stats"><div><strong>{attendance.filter((item) => item.record.status === "Present").length}</strong><span>Present entries</span></div><div><strong>{invitations.length}</strong><span>Invitations</span></div><div><strong>{boy.status}</strong><span>Current status</span></div><div className={needsMentorAttention(data, boy.id) ? "attention" : ""}><strong>{needsMentorAttention(data, boy.id) ? "Needs attention" : "On track"}</strong><span>{needsMentorAttention(data, boy.id) ? `${followUpCount(data, boy.id)} invitations, no attendance` : "Follow-up signal"}</span></div></div>
 
     <form className="profile-edit-form" onSubmit={updateProfile}>
@@ -795,9 +799,9 @@ function WebsiteContentView({ data, save, busy }: { data: State; save: (action: 
   }
 
   return <div className="view-panel content-editor">
-    <SectionTitle eyebrow="Admin only" title="Edit website wording live" copy="Update the main headings and descriptions here. Saves go to the Website Content tab in Google Sheets and appear for every approved user on their next refresh." />
+    <SectionTitle eyebrow="Admin only" title="Edit website wording live" copy="Update the main headings and descriptions here. Saves update the website content and appear for every approved user on their next refresh." />
     <div className="content-notice"><span>✓</span><p><b>No redeployment needed.</b> Website text and design refresh automatically while this page is visible, normally every {boundedNumber(siteSetting(data, "auto_refresh_seconds", "30"), 30, 30, 120)} seconds. Slow connections may take longer.</p></div>
-    <div className="settings-sheet-card"><div><p className="eyebrow">Design controls</p><h3>Colours, fonts, sizing and layout</h3><p>Use the <b>Website Settings</b> tab to customise the full visual theme. Every row explains the allowed value and the part of the site it changes.</p></div><a href="/api/spreadsheet?tab=settings" target="_blank" rel="noreferrer">Open Website Settings →</a></div>
+    <div className="settings-sheet-card"><div><p className="eyebrow">Design controls</p><h3>Colours, fonts, sizing and layout</h3><p>Use <b>Website Settings</b> to customise the full visual theme. Every row explains the allowed value and the part of the site it changes.</p></div><a href={data.backend === "supabase" ? "/manage?section=websiteSettings" : "/api/spreadsheet?tab=settings"} target="_blank" rel="noreferrer">Open Website Settings →</a></div>
     <div className="content-section-grid">{sections.map((section) => <section className="content-section" key={section}><div className="content-section-head"><p className="eyebrow">Website copy</p><h3>{section}</h3></div><div className="content-field-grid">{contentFields.filter((field) => field[1] === section).map(([key, , label, multiline]) => <label className={multiline ? "content-field full" : "content-field"} key={key}><span>{label}</span>{multiline ? <textarea rows={4} maxLength={3000} value={draft[key] ?? ""} onChange={(event) => { setDraft((current) => ({ ...current, [key]: event.target.value })); setDirty(true); }} /> : <input maxLength={3000} value={draft[key] ?? ""} onChange={(event) => { setDraft((current) => ({ ...current, [key]: event.target.value })); setDirty(true); }} />}<small>{key}</small></label>)}</div></section>)}</div>
     <div className="content-save-bar"><div><strong>{dirty ? "Unsaved wording changes" : "All wording is saved"}</strong><span>Only Admin accounts can open or save this screen.</span></div><button className="secondary-cta" disabled={!dirty || busy === "website-content"} onClick={() => { setDraft({ ...data.websiteContent }); setDirty(false); }}>Discard changes</button><button className="primary-button" disabled={!dirty || busy === "website-content"} onClick={() => void saveContent()}>{busy === "website-content" ? "Saving…" : "Save website text"}</button></div>
   </div>;

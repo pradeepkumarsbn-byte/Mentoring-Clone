@@ -1,6 +1,8 @@
 export const maxDuration = 180;
 import { bridgeRequest, bridgeUrl } from "../../connection";
 import { normalizeBridgeState } from "../../bridge-state";
+import { useSupabase } from '../../../lib/backend';
+import { supabaseRead, supabaseWrite } from '../../../lib/supabase-api';
 export const dynamic = "force-dynamic";
 
 import { chatGPTSignInPath, getChatGPTUser } from "../../chatgpt-auth";
@@ -105,6 +107,7 @@ async function authorize(operation?: Action): Promise<{ viewer?: Viewer; respons
 }
 
 export async function GET() {
+  if(useSupabase()) return supabaseRead();
   try {
     const authorization = await authorize();
     if (authorization.response) return authorization.response;
@@ -131,6 +134,7 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  if(useSupabase()) return supabaseWrite(request);
   try {
     if (!request.headers.get("content-type")?.includes("application/json")) {
       return json({ error: "JSON is required." }, 415);
