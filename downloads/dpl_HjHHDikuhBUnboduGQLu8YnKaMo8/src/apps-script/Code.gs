@@ -2,9 +2,6 @@
 const MENTORING_TOKEN = PropertiesService.getScriptProperties().getProperty("MENTORING_SHEETS_TOKEN") || "";
 const MENTORING_SPREADSHEET_ID = PropertiesService.getScriptProperties().getProperty("MENTORING_SPREADSHEET_ID") || "";
 const TABS = Object.freeze({
-  rc: "RC Attendance",
-  weekly: "Weekly Programs",
-  weeklyAttendance: "Weekly Attendance",
   mentors: "Mentors",
   boys: "Boys",
   programs: "Programs",
@@ -29,9 +26,6 @@ function doPost(event) {
     lock = LockService.getScriptLock();
     if (!lock.tryLock(10000)) throw new Error("Another save is in progress. Try again shortly.");
     switch (action) {
-      case "set_rc": setRC_(body); break;
-      case "add_weekly_program": addWeekly_(body); break;
-      case "set_weekly_attendance": setWeeklyAttendance_(body); break;
       case "add_boy": addBoy_(body); break;
       case "update_boy": updateBoy_(body); break;
       case "delete_boy": deleteBoy_(body); break;
@@ -111,10 +105,7 @@ function state_() {
   }).filter(function (row) { return row.id && row.startDate; });
 
   return {
-    ok: true, backendVersion: "header-mapping-v1", capabilities: ["boy-floor-v1", "daily-weekly-v1"], mentors: mentors, programTypes: programTypes, boys: boys, programs: programs,
-    rcAttendance: optionalRows_(TABS.rc).map(function(row) { return {id:text_(row["RC ID"]),boyId:text_(row["Boy ID"]),date:isoDate_(row.Date),status:text_(row.Status),updatedAt:isoTimestamp_(row["Updated On"]),updatedBy:text_(row["Updated By"])}; }),
-    weeklyPrograms: optionalRows_(TABS.weekly).map(function(row) { return {id:text_(row["Weekly ID"]),topic:text_(row.Topic),date:isoDate_(row.Date),venue:text_(row.Venue)}; }),
-    weeklyAttendance: optionalRows_(TABS.weeklyAttendance).map(function(row) { return {id:text_(row["Attendance ID"]),programId:text_(row["Weekly ID"]),boyId:text_(row["Boy ID"]),status:text_(row.Status),updatedAt:isoTimestamp_(row["Updated On"]),updatedBy:text_(row["Updated By"])}; }),
+    ok: true, backendVersion: "header-mapping-v1", capabilities: ["boy-floor-v1"], mentors: mentors, programTypes: programTypes, boys: boys, programs: programs,
     attendance: attendance, invitations: invitations, calendarEvents: calendarEvents,
     websiteContent: keyValues_(TABS.content, "Key", "Value"),
     websiteSettings: keyValues_(TABS.settings, "Setting ID", "Value"),
@@ -126,7 +117,7 @@ function checkAccess_(email) {
   const normalized = text_(email).toLowerCase();
   const row = rows_(TABS.access).find(function (item) { return text_(item.Email).toLowerCase() === normalized; });
   const active = row && text_(row.Active).toLowerCase() === "yes";
-  return { ok: true, backendVersion: "header-mapping-v1", capabilities: ["boy-floor-v1", "daily-weekly-v1"], allowed: !!active, name: active ? text_(row.Name) : "", role: active && text_(row.Role).toLowerCase() === "admin" ? "admin" : "mentor" };
+  return { ok: true, backendVersion: "header-mapping-v1", capabilities: ["boy-floor-v1"], allowed: !!active, name: active ? text_(row.Name) : "", role: active && text_(row.Role).toLowerCase() === "admin" ? "admin" : "mentor" };
 }
 
 function addBoy_(body) {
@@ -159,8 +150,6 @@ function deleteBoy_(body) {
   findRows_(TABS.invitations,{"Boy ID":value});
   deleteMatches_(TABS.attendance,"Boy ID",value);
   deleteMatches_(TABS.invitations,"Boy ID",value);
-  if (SpreadsheetApp.openById(MENTORING_SPREADSHEET_ID).getSheetByName(TABS.rc)) deleteMatches_(TABS.rc,"Boy ID",value);
-  if (SpreadsheetApp.openById(MENTORING_SPREADSHEET_ID).getSheetByName(TABS.weeklyAttendance)) deleteMatches_(TABS.weeklyAttendance,"Boy ID",value);
   sheet_(TABS.boys).deleteRow(row);
 }
 
@@ -379,57 +368,4 @@ function floorField_(body, current) {
   if (floor && !/^B[0-9]$/.test(floor)) throw new Error("Select a floor from B0 to B9, or leave it unassigned.");
   if (floor && (!/^\d+$/.test(room) || Number(room) < 1 || Number(room) > 61)) throw new Error("Select a room from 1 to 61 for the assigned floor.");
   return floor;
-}
-
-// New collections are optional on reads, so upgrading never interrupts existing records.
-function optionalRows_(name) {
-  return SpreadsheetApp.openById(MENTORING_SPREADSHEET_ID).getSheetByName(name) ? rows_(name) : [];
-}
-function ensureTrackingSheet_(name, headers) {
-  const book = SpreadsheetApp.openById(MENTORING_SPREADSHEET_ID);
-  if (!book.getSheetByName(name)) book.insertSheet(name).appendRow(headers);
-  columns_(table_(name), Object.fromEntries(headers.map(function(header) { return [header, ""]; })));
-}
-function upsertTracking_(name, match, fields, idHeader) {
-  const existing = findRows_(name, match);
-  fields[idHeader] = existing.length ? existing[0].object[idHeader] : id_();
-  if (existing.length) updateObject_(name, existing[0].row, fields);
-  else appendObject_(name, fields);
-  for (let index = existing.length - 1; index >= 1; index--) sheet_(name).deleteRow(existing[index].row);
-}
-function setRC_(body) {
-  const boyId = required_(body.boyId, "Boy");
-  findObject_(TABS.boys, "Boy ID", boyId);
-  const date = requiredDate_(body.date);
-  const status = text_(body.status);
-  if (["", "Present", "Absent", "MMC", "Outstation"].indexOf(status) < 0) throw new Error("Select a valid RC status.");
-  ensureTrackingSheet_(TABS.rc, ["RC ID", "Boy ID", "Date", "Status", "Updated On", "Updated By"]);
-  // Compare normalized dates: Sheets can return date cells as Date objects.
-  const existing = table_(TABS.rc).values.slice(1);
-  const headers = table_(TABS.rc).headers;
-  const found = existing.map(function(row,index) { return {row:index+2,values:row}; }).filter(function(item) {
-    return text_(item.values[headers.indexOf("Boy ID")]) === boyId && isoDate_(item.values[headers.indexOf("Date")]) === date;
-  });
-  if (!status) { found.reverse().forEach(function(item) { sheet_(TABS.rc).deleteRow(item.row); }); return; }
-  const fields = {"RC ID":found.length ? found[0].values[headers.indexOf("RC ID")] : id_(), "Boy ID":boyId,"Date":date,"Status":status,"Updated On":new Date(),"Updated By":clean_(body.updatedBy,250)};
-  if (found.length) updateObject_(TABS.rc,found[0].row,fields); else appendObject_(TABS.rc,fields);
-  found.slice(1).reverse().forEach(function(item) { sheet_(TABS.rc).deleteRow(item.row); });
-}
-function addWeekly_(body) {
-  const topic = required_(body.topic,"Program topic");
-  const date = requiredDate_(body.date);
-  ensureTrackingSheet_(TABS.weekly,["Weekly ID","Topic","Date","Venue"]);
-  appendObject_(TABS.weekly,{"Weekly ID":id_(),"Topic":clean_(topic,180),"Date":date,"Venue":clean_(body.venue,200)});
-}
-function setWeeklyAttendance_(body) {
-  const boyId = required_(body.boyId,"Boy");
-  const programId = required_(body.programId,"Weekly program");
-  findObject_(TABS.boys,"Boy ID",boyId);
-  findObject_(TABS.weekly,"Weekly ID",programId);
-  const status = text_(body.status);
-  if (["","Present","Absent"].indexOf(status) < 0) throw new Error("Select Present or Absent.");
-  ensureTrackingSheet_(TABS.weeklyAttendance,["Attendance ID","Weekly ID","Boy ID","Status","Updated On","Updated By"]);
-  const match = {"Weekly ID":programId,"Boy ID":boyId};
-  if (!status) return deleteCompound_(TABS.weeklyAttendance,match);
-  upsertTracking_(TABS.weeklyAttendance,match,{"Weekly ID":programId,"Boy ID":boyId,"Status":status,"Updated On":new Date(),"Updated By":clean_(body.updatedBy,250)},"Attendance ID");
 }

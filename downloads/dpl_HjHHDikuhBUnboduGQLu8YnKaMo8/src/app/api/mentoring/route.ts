@@ -6,9 +6,6 @@ export const dynamic = "force-dynamic";
 import { chatGPTSignInPath, getChatGPTUser } from "../../chatgpt-auth";
 
 type Action =
-  | { action: "set_rc"; boyId?: unknown; date?: unknown; status?: unknown }
-  | { action: "add_weekly_program"; topic?: unknown; date?: unknown; venue?: unknown }
-  | { action: "set_weekly_attendance"; boyId?: unknown; programId?: unknown; status?: unknown }
   | { action: "add_boy"; name?: unknown; contact?: unknown; college?: unknown; hostel?: unknown; floor?: unknown; branch?: unknown; section?: unknown; status?: unknown; mentorId?: unknown; comment?: unknown }
   | { action: "update_boy"; boyId?: unknown; contact?: unknown; college?: unknown; hostel?: unknown; floor?: unknown; branch?: unknown; section?: unknown; status?: unknown; mentorId?: unknown; comment?: unknown }
   | { action: "delete_boy"; boyId?: unknown }
@@ -37,7 +34,6 @@ type BridgeState = {
 type Viewer = { email: string; name: string; role: "admin" | "mentor" };
 
 const allowedActions = new Set<Action["action"]>([
-  "set_rc", "add_weekly_program", "set_weekly_attendance",
   "add_boy",
   "update_boy",
   "delete_boy",
@@ -149,9 +145,6 @@ export async function POST(request: Request) {
     if ((body.action === "add_boy" || body.action === "update_boy") && body.floor !== undefined
       && !(Array.isArray(authorization.capabilities) && authorization.capabilities.includes("boy-floor-v1"))) {
       return json({ error: "Deploy the latest Apps Script with Floor support before saving boy details. This prevents losing the selected floor." }, 503);
-    }
-    if (["set_rc", "add_weekly_program", "set_weekly_attendance"].includes(body.action) && !(Array.isArray(authorization.capabilities) && authorization.capabilities.includes("daily-weekly-v1"))) {
-      return json({ error: "Deploy the latest Apps Script to enable RC and weekly attendance." }, 503);
     }
     if (body.action === "update_website_content" && authorization.viewer?.role !== "admin") {
       return json({ error: "Only an Admin can update website wording." }, 403);

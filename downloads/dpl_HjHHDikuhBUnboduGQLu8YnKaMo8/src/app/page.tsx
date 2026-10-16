@@ -1,12 +1,11 @@
 "use client";
 
-import { RCView, WeeklyView, BackupView, type TrackingState } from "./tracking-views";
 import HostelMapView from "./hostel-map-view";
 import HostelFields from "./hostel-fields";
 import OverviewStats from "./overview-stats";
 import { CSSProperties, FormEvent, useCallback, useEffect, useRef, useState } from "react";
 
-type View = "rc" | "weekly" | "backup" | "map" | "overview" | "planning" | "boys" | "programs" | "attendance" | "invitations" | "mentors" | "content";
+type View = "map" | "overview" | "planning" | "boys" | "programs" | "attendance" | "invitations" | "mentors" | "content";
 type Modal = "boy" | "program" | null;
 type Mentor = { id: string; name: string; initials: string; tone: string };
 type ProgramType = { id: string; name: string };
@@ -17,13 +16,10 @@ type Attendance = { id: string; programId: string; boyId: string; mentorId: stri
 type Invitation = { id: string; programId: string; boyId: string; mentorId: string; response: string; updatedAt: string; updatedBy: string };
 type CalendarEvent = { id: string; title: string; startDate: string; endDate: string; type: string; availability: string; semester: string; scope: string; note: string; source: string };
 type Viewer = { email: string; name: string; role: "admin" | "mentor" };
-type State = TrackingState & { mentors: Mentor[]; programTypes: ProgramType[]; boys: Boy[]; programs: Program[]; attendance: Attendance[]; invitations: Invitation[]; calendarEvents: CalendarEvent[]; websiteContent: Record<string, string>; websiteSettings: Record<string, string>; refreshedAt: string; viewer?: Viewer };
+type State = { mentors: Mentor[]; programTypes: ProgramType[]; boys: Boy[]; programs: Program[]; attendance: Attendance[]; invitations: Invitation[]; calendarEvents: CalendarEvent[]; websiteContent: Record<string, string>; websiteSettings: Record<string, string>; refreshedAt: string; viewer?: Viewer };
 
-const emptyState: State = { rcAttendance: [], weeklyPrograms: [], weeklyAttendance: [], mentors: [], programTypes: [], boys: [], programs: [], attendance: [], invitations: [], calendarEvents: [], websiteContent: {}, websiteSettings: {}, refreshedAt: "" };
+const emptyState: State = { mentors: [], programTypes: [], boys: [], programs: [], attendance: [], invitations: [], calendarEvents: [], websiteContent: {}, websiteSettings: {}, refreshedAt: "" };
 const nav: { id: View; label: string }[] = [
-  { id: "rc", label: "RC Chanting" },
-  { id: "weekly", label: "Weekly Programs" },
-  { id: "backup", label: "Export / Backup" },
   { id: "overview", label: "Overview" },
   { id: "planning", label: "Planning" },
   { id: "boys", label: "Boys" },
@@ -397,9 +393,6 @@ export default function Home() {
         <section className="workspace" aria-live="polite">
           {loading ? <LoadingState /> : <>
             {view === "overview" && <Overview data={data} setView={setView} setModal={setModal} openProfile={setProfileBoyId} />}
-            {view === "rc" && <RCView data={data} save={save} busy={busy} />}
-            {view === "weekly" && <WeeklyView data={data} save={save} busy={busy} />}
-            {view === "backup" && <BackupView />}
             {view === "planning" && <PlanningView data={data} />}
             {view === "map" && <HostelMapView boys={data.boys} openProfile={setProfileBoyId} ready={!!data.refreshedAt} />}
             {view === "boys" && <BoysView data={data} setModal={setModal} openProfile={setProfileBoyId} />}

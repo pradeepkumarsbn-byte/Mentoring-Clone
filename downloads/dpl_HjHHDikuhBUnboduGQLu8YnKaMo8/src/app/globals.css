@@ -817,18 +817,3 @@ footer { width: min(1180px, calc(100% - 44px)); margin: 0 auto; padding: 22px 0 
 @media(max-width:1000px) { .analytics-studio .analytics-charts { grid-template-columns:1fr; } .analytics-heading { flex-wrap:wrap; } }
 @media(max-width:640px) { .analytics-studio { padding:15px; border-radius:20px; } .analytics-toolbar { align-items:stretch; flex-direction:column; } .analytics-mentor { justify-content:space-between; } .analytics-studio .panel { padding:18px; } .analytics-studio .analytics-metrics { grid-template-columns:1fr; } .analytics-live { align-self:start; } .analytics-periods button { flex:1; } .chart-legend { display:none; } .chart-scale { left:14px; top:145px; } }
 @media(prefers-reduced-motion:reduce) { .analytics-studio * { transition:none !important; } }
-
-/* Monthly attendance stays scrollable on phones and preserves the boy's name. */
-.tracking-view { padding: 24px; }
-.tracking-toolbar { display: flex; flex-wrap: wrap; gap: 16px; align-items: end; margin: 20px 0; }
-.tracking-toolbar label { display: grid; gap: 7px; font-size: 13px; min-width: 170px; }
-.tracking-toolbar input, .tracking-toolbar select, .tracking-grid select { padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); color: var(--ink); font: inherit; }
-.tracking-note { color: var(--muted); font-size: 13px; line-height: 1.6; }
-.tracking-scroll { overflow-x: auto; max-width: 100%; margin-top: 20px; }
-.tracking-grid { border-collapse: collapse; width: 100%; font-size: 13px; }
-.tracking-grid caption { text-align: left; padding: 12px 0; }
-.tracking-grid th, .tracking-grid td { border: 1px solid var(--line); padding: 10px; text-align: left; }
-.tracking-grid th:first-child { position: sticky; left: 0; z-index: 1; background: var(--paper); min-width: 210px; }
-.tracking-grid small { display: block; margin-top: 6px; font-weight: normal; color: var(--muted); }
-.tracking-grid select { min-width: 125px; }
-.tracking-grid select:disabled { opacity: 0.5; }
