@@ -1,6 +1,9 @@
 type Row = Record<string, unknown>;
 const key = (value: string) => value.replace(/[^a-z0-9]/gi, '').toLowerCase();
 const fields: Record<string, Record<string, string[]>> = {
+  rcAttendance: { id: ["RC ID"], boyId: [], date: [], status: [], updatedAt: ["Updated On"], updatedBy: [] },
+  weeklyPrograms: { id: ["Weekly ID"], topic: [], date: [], venue: [] },
+  weeklyAttendance: { id: ["Attendance ID"], programId: ["Weekly ID"], boyId: [], status: [], updatedAt: ["Updated On"], updatedBy: [] },
   mentors: { id: ['Mentor ID'], name: ['Mentor Name'], initials: [], tone: [] },
   programTypes: { id: ['Program Type ID'], name: ['Program Name'] },
   boys: { id: ['Boy ID'], name: [], contact: [], college: [], hostel: ['Room No', 'Room Number', 'Hostel Name'], floor: ['Floor'], branch: [], section: [], status: [], mentorId: [], comment: [], createdAt: ['Added On'], createdBy: ['Added By'] },
@@ -25,7 +28,7 @@ export function normalizeBridgeState(value: unknown) {
   if (!object(value)) throw new Error('The Google Sheet returned an invalid response.');
   const state: Record<string, unknown> = { ...value };
   for (const [collection, schema] of Object.entries(fields)) {
-    const rows = value[collection];
+    const rows = value[collection] ?? (["rcAttendance", "weeklyPrograms", "weeklyAttendance"].includes(collection) ? [] : undefined);
     if (!Array.isArray(rows)) throw new Error('The Google Sheet returned an invalid response.');
     state[collection] = rows.flatMap(row => {
       if (!object(row)) throw new Error('The Google Sheet returned an invalid response.');
