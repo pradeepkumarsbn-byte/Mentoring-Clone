@@ -4,6 +4,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 const source=readFileSync(new URL('./Code.gs',import.meta.url),'utf8');
 const schemas={
+ 'RC Attendance':['RC ID','Boy ID','Date','Status','Updated On','Updated By'],
+ 'Weekly Programs':['Weekly ID','Topic','Date','Venue'],
+ 'Weekly Attendance':['Attendance ID','Weekly ID','Boy ID','Status','Updated On','Updated By'],
  Mentors:['Mentor ID','Mentor Name','Email'], Boys:['Boy ID','Name','Contact','Branch','Section','College','Hostel Name','DOB','Native','Status','Mentor ID','Comment','Added On','Added By','Floor'],
  Programs:['Program ID','Program Name','Date','Venue','Invited','Attended','Speaker','Program Type ID'],ProgramTypes:['Program Type ID','Program Name'],
  Attendance:['Attendance ID','Program ID','Mentor ID','Boy ID','Status','Reason','Updated On','Updated By'],Invitations:['Invitation ID','Program ID','Mentor ID','Boy ID','Response','Updated On','Updated By'],
@@ -19,7 +22,7 @@ function fixture(reorder=false){
  const seed=(name,fields)=>sheets[name].appendRow(sheets[name].rows[0].map(h=>fields[h]??''));
  seed('Mentors',{'Mentor ID':'M1','Mentor Name':'Mentor'});seed('ProgramTypes',{'Program Type ID':'PT-001','Program Name':'DYS0'});
  const context=vm.createContext({PropertiesService:{getScriptProperties:()=>({getProperty:k=>k==='MENTORING_SHEETS_TOKEN'?'test-token':'test-sheet'})},
- SpreadsheetApp:{openById:()=>({getSheetByName:n=>sheets[n]}),flush:()=>{}},
+ SpreadsheetApp:{openById:()=>({getSheetByName:n=>sheets[n],insertSheet:n=>{const rows=[];return sheets[n]={rows,getDataRange:()=>({getValues:()=>rows.map(r=>[...r])}),appendRow:r=>rows.push([...r]),deleteRow:r=>rows.splice(r-1,1),getRange:(r,c)=>({setValue:v=>{rows[r-1][c-1]=v;}})};}}),flush:()=>{}},
  LockService:{getScriptLock:()=>({tryLock:()=>{held=true;return true;},hasLock:()=>held,releaseLock:()=>{held=false;}})},
  Utilities:{getUuid:()=>`uuid-${++sequence}`,formatDate:d=>d.toISOString().slice(0,10)},Session:{getScriptTimeZone:()=> 'UTC'},
  ContentService:{MimeType:{JSON:'json'},createTextOutput:s=>({setMimeType:()=>JSON.parse(s)})}});
@@ -90,4 +93,45 @@ test('legacy room values stay intact during unrelated profile changes',()=>{
  const f=fixture();f.boy();const before=f.objects('Boys')[0];
  const result=f.call('update_boy',{boyId:before['Boy ID'],mentorId:'M1',floor:'',hostel:'204',comment:'Follow-up'});
  assert.equal(result.ok,true);assert.equal(result.boys[0].hostel,'204');assert.equal(result.boys[0].floor,'');
+});
+
+for (const reorder of [false,true]) test('RC persists four statuses, handles date cells and clears without duplicate rows; reordered='+reorder,()=>{
+ const f=fixture(reorder);const boyId=f.boy().boys[0].id;
+ for(const status of ['Present','Absent','MMC','Outstation']) {
+  const r=f.call('set_rc',{boyId,date:'2026-10-15',status,updatedBy:'mentor@example.com'});
+  assert.equal(r.ok,true);assert.equal(r.rcAttendance.length,1);assert.equal(r.rcAttendance[0].status,status);
+ }
+ const sheet=f.sheets['RC Attendance'];sheet.rows[1][sheet.rows[0].indexOf('Date')]=new Date('2026-10-15T00:00:00Z');
+ assert.equal(f.call('set_rc',{boyId,date:'2026-10-15',status:'Present'}).rcAttendance.length,1);
+ assert.equal(f.call('set_rc',{boyId,date:'2026-02-30',status:'Absent'}).ok,false);
+ assert.equal(f.call('set_rc',{boyId,date:'2026-10-15',status:'invalid'}).ok,false);
+ assert.equal(f.call('set_rc',{boyId:'missing',date:'2026-10-15',status:'Present'}).ok,false);
+ assert.equal(f.call('set_rc',{boyId,date:'2026-10-15',status:''}).rcAttendance.length,0);
+});
+test('weekly participation repeats across programs, updates, clears and cleans up deleted boys',()=>{
+ const f=fixture(true);const boyId=f.boy().boys[0].id;
+ for(const date of ['2026-10-08','2026-10-15']) {
+  const r=f.call('add_weekly_program',{topic:'Weekly discussion',date});assert.equal(r.ok,true);
+  const programId=r.weeklyPrograms.at(-1).id;
+  assert.equal(f.call('set_weekly_attendance',{boyId,programId,status:'Present'}).ok,true);
+  assert.equal(f.call('set_weekly_attendance',{boyId,programId,status:'Present'}).ok,true);
+ }
+ assert.equal(f.call('get_state').weeklyAttendance.length,2);
+ const programId=f.call('get_state').weeklyPrograms[0].id;
+ assert.equal(f.call('set_weekly_attendance',{boyId,programId,status:''}).weeklyAttendance.length,1);
+ f.call('set_rc',{boyId,date:'2026-10-15',status:'MMC'});
+ const deleted=f.call('delete_boy',{boyId});assert.equal(deleted.rcAttendance.length,0);assert.equal(deleted.weeklyAttendance.length,0);
+});
+test('new tracking tabs are optional when reading older spreadsheets',()=>{
+ const f=fixture();delete f.sheets['RC Attendance'];delete f.sheets['Weekly Programs'];delete f.sheets['Weekly Attendance'];
+ const state=f.call('get_state');assert.equal(state.ok,true);assert.equal(state.rcAttendance.length,0);
+});
+
+test('first tracking writes create only their own missing tabs',()=>{
+ const f=fixture();const boyId=f.boy().boys[0].id;
+ delete f.sheets['RC Attendance'];delete f.sheets['Weekly Programs'];delete f.sheets['Weekly Attendance'];
+ assert.equal(f.call('set_rc',{boyId,date:'2026-10-15',status:'Present'}).ok,true);
+ const program=f.call('add_weekly_program',{topic:'Topic',date:'2026-10-15'}).weeklyPrograms[0];
+ assert.equal(f.call('set_weekly_attendance',{boyId,programId:program.id,status:'Present'}).ok,true);
+ assert.equal(f.call('get_state').weeklyAttendance.length,1);
 });
